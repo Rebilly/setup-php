@@ -2,7 +2,15 @@
 add_sudo() {
   if ! command -v sudo >/dev/null; then
     check_package sudo || apt-get update
-    apt-get install -y sudo
+    apt-get install -y sudo || (apt-get update && apt-get install -y sudo)
+  fi
+}
+
+# Function to link apt-fast to apt-get
+link_apt_fast() {
+  if ! command -v apt-fast >/dev/null; then
+    sudo ln -sf /usr/bin/apt-get /usr/bin/apt-fast
+    trap "sudo rm -f /usr/bin/apt-fast 2>/dev/null" exit
   fi
 }
 
@@ -15,10 +23,19 @@ self_hosted_helper() {
   install_packages apt-transport-https ca-certificates curl file make jq unzip autoconf automake gcc g++ gnupg
 }
 
+# Function to fix broken packages.
+fix_broken_packages() {
+  sudo apt --fix-broken install >/dev/null 2>&1
+}
+
 # Function to install a package
 install_packages() {
   packages=("$@")
-  $apt_install "${packages[@]}" >/dev/null 2>&1 || (update_lists && $apt_install "${packages[@]}" >/dev/null 2>&1)
+  if ! [ -e /etc/dpkg/dpkg.cfg.d/force-confnew ]; then
+    echo "force-confnew" | sudo tee /etc/dpkg/dpkg.cfg.d/force-confnew >/dev/null 2>&1
+    trap "sudo rm -f /etc/dpkg/dpkg.cfg.d/force-confnew 2>/dev/null" exit
+  fi
+  $apt_install "${packages[@]}" >/dev/null 2>&1 || (update_lists && fix_broken_packages && $apt_install "${packages[@]}" >/dev/null 2>&1)
 }
 
 # Function to disable an extension.
@@ -29,8 +46,8 @@ disable_extension_helper() {
   if [ "$disable_dependents" = "true" ]; then
     disable_extension_dependents "$extension"
   fi
-  sudo sed -Ei "/=(.*\/)?\"?$extension(.so)?$/d" "${ini_file[@]}" "$pecl_file"
-  sudo find "$ini_dir"/.. -name "*$extension.ini" -not -path "*phar.ini" -not -path "*pecl.ini" -not -path "*mods-available*" -delete >/dev/null 2>&1 || true
+  sudo sed -Ei "/=(.*\/)?\"?$extension(.so)?\"?$/d" "${ini_file[@]}" "$pecl_file"
+  sudo find "$ini_dir"/.. -name "*-$extension.ini" -not -path "*phar.ini" -not -path "*pecl.ini" -not -path "*mods-available*" -delete >/dev/null 2>&1 || true
   sudo rm -f /tmp/php"$version"_extensions
   mkdir -p /tmp/extdisabled/"$version"
   echo '' | sudo tee /tmp/extdisabled/"$version"/"$extension" >/dev/null 2>&1
@@ -94,14 +111,19 @@ add_devtools() {
   add_log "${tick:?}" "$tool" "Added $tool $semver"
 }
 
-# Function to setup the nightly build from shivammathur/php-builder
-setup_nightly() {
-  run_script "php-builder" "${runner:?}" "$version" "${debug:?}" ${ts:?}
+# Function to setup PHP from the shivammathur/php-builder builds.
+setup_php_builder() {
+  run_script "php-builder" "${runner:?}" "$version" "${debug:?}" "${ts:?}"
 }
 
 # Function to setup PHP 5.3, PHP 5.4 and PHP 5.5.
 setup_old_versions() {
   run_script "php5-ubuntu" "$version"
+}
+
+# Function to setup PHP from the cached builds.
+setup_cached_versions() {
+  run_script "php-ubuntu" "$version" "${debug:?}" "${ts:?}"
 }
 
 # Function to add PECL.
@@ -144,13 +166,9 @@ get_php_packages() {
 
 # Function to install packaged PHP
 add_packaged_php() {
-  if [ "$runner" = "self-hosted" ] || [ "${use_package_cache:-true}" = "false" ]; then
-    add_ppa ondrej/php >/dev/null 2>&1 || update_ppa ondrej/php
-    IFS=' ' read -r -a packages <<<"$(get_php_packages)"
-    install_packages "${packages[@]}"
-  else
-    run_script "php-ubuntu" "$version" "${debug:?}"
-  fi
+  add_ppa ondrej/php >/dev/null 2>&1 || update_ppa ondrej/php
+  IFS=' ' read -r -a packages <<<"$(get_php_packages)"
+  install_packages "${packages[@]}"
 }
 
 # Function to update PHP.
@@ -167,14 +185,18 @@ update_php() {
 
 # Function to install PHP.
 add_php() {
-  if [[ "$version" =~ ${nightly_versions:?} ]] || [[ "${ts:?}" = "zts" ]]; then
-    setup_nightly
+  if [ "${runner:?}" = "self-hosted" ] || [ "${use_package_cache:-true}" = "false" ]; then
+    if [[ "$version" =~ ${nightly_versions:?} || "$ts" = "zts" ]]; then
+        setup_php_builder
+    else
+      add_packaged_php
+      switch_version >/dev/null 2>&1
+      add_pecl
+    fi
   elif [[ "$version" =~ ${old_versions:?} ]]; then
     setup_old_versions
   else
-    add_packaged_php
-    switch_version >/dev/null 2>&1
-    add_pecl
+    setup_cached_versions
   fi
   status="Installed"
 }
@@ -224,6 +246,7 @@ setup_php() {
   step_log "Setup PHP"
   sudo mkdir -m 777 -p /var/run /run/php
   php_config="$(command -v php-config)"
+  check_pre_installed
   if [[ -z "$php_config" ]] || [ "$(php_semver | cut -c 1-3)" != "$version" ]; then
     if [ ! -e "/usr/bin/php$version" ] || [ ! -e "/usr/bin/php-config$version" ]; then
       add_php >/dev/null 2>&1
@@ -267,7 +290,7 @@ setup_php() {
 }
 
 # Variables
-version=${1:-'8.2'}
+version=${1:-'8.4'}
 ini=${2:-'production'}
 src=${0%/*}/..
 debconf_fix="DEBIAN_FRONTEND=noninteractive"
@@ -275,6 +298,7 @@ apt_install="sudo $debconf_fix apt-fast install -y --no-install-recommends"
 scripts="$src"/scripts
 
 add_sudo >/dev/null 2>&1
+link_apt_fast >/dev/null 2>&1
 
 . /etc/os-release
 # shellcheck source=.

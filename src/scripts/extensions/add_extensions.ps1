@@ -1,3 +1,32 @@
+# Function to check if extension is enabled.
+Function Test-Extension() {
+  Param (
+    [Parameter(Position = 0, Mandatory = $true)]
+    [ValidateNotNull()]
+    [string]
+    $extension
+  )
+  $extension_info = Get-PhpExtension -Path $php_dir | Where-Object { $_.Name -eq $extension -or $_.Handle -eq $extension }
+  return $null -ne $extension_info
+}
+
+# Function to add extension log.
+Function Add-ExtensionLog() {
+  Param (
+    [Parameter(Position = 0, Mandatory = $true)]
+    [ValidateNotNull()]
+    $extension,
+    [Parameter(Position = 1, Mandatory = $true)]
+    [ValidateNotNull()]
+    $message
+  )
+  if (Test-Extension $extension) {
+    Add-Log $tick $extension $message
+  } else {
+    Add-Log $cross $extension "Could not install $extension on PHP $( $installed.FullVersion )"
+  }
+}
+
 # Function to link dependencies to PHP directory.
 Function Set-ExtensionPrerequisites
 {
@@ -37,7 +66,7 @@ Function Enable-Extension() {
 }
 
 # Function to add custom built PHP extension for nightly builds.
-Function Add-NightlyExtension {
+Function Add-ExtensionFromGithub {
   Param (
     [Parameter(Position = 0, Mandatory = $true)]
     [ValidateNotNull()]
@@ -48,7 +77,7 @@ Function Add-NightlyExtension {
   if($ts) { $ts_part = 'ts' } else { $ts_part = 'nts' }
   $repo = "$github/shivammathur/php-extensions-windows"
   $url = "$repo/releases/download/builds/php$version`_$ts_part`_$arch`_$extension.dll"
-  Invoke-WebRequest -UseBasicParsing -Uri $url  -OutFile "$ext_dir\php_$extension.dll"
+  Get-File -Url $url  -OutFile "$ext_dir\php_$extension.dll"
   if(Test-Path "$ext_dir\php_$extension.dll") {
     Enable-Extension $extension > $null
   } else {
@@ -71,7 +100,7 @@ Function Add-Extension {
     $stability = 'stable',
     [Parameter(Position = 2, Mandatory = $false)]
     [ValidateNotNull()]
-    [ValidatePattern('^\d+(\.\d+){0,2}$')]
+    [ValidatePattern('^\d+(\.\d+){0,3}$')]
     [string]
     $extension_version = ''
   )
@@ -94,11 +123,11 @@ Function Add-Extension {
     }
     else {
       if(($version -match $nightly_versions) -and (Select-String -Path $src\configs\windows_extensions -Pattern $extension -SimpleMatch -Quiet)) {
-        Add-NightlyExtension $extension
+        Add-ExtensionFromGithub $extension
       } else {
-        # Patch till DLLs for PHP 8.1 and 8.2 are released as stable.
+        # Patch till DLLs for PHP 8.1 and above are released as stable.
         $minimumStability = $stability
-        if ($version -match '8.[1-2]' -and $stability -eq 'stable') {
+        if ($version -match '8.[1-4]' -and $stability -eq 'stable') {
           $minimumStability = 'snapshot'
         }
 
@@ -106,6 +135,10 @@ Function Add-Extension {
         if ($extension_version -ne '')
         {
           $params["Version"] = $extension_version
+        }
+        # If extension for a different version exists
+        if(Test-Path $ext_dir\php_$extension.dll) {
+          Move-Item $ext_dir\php_$extension.dll $ext_dir\php_$extension.bak.dll -Force
         }
         Install-PhpExtension @params
         Set-ExtensionPrerequisites $extension

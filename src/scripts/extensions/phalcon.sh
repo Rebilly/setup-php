@@ -1,7 +1,11 @@
 # Helper function to get phalcon version
 get_phalcon_version() {
   if [ "$extension" = "phalcon5" ]; then
-    get_pecl_version phalcon stable 5
+    if [ "${version:?}" = "7.4" ]; then
+      echo '5.4.0'
+    else
+      get_pecl_version phalcon stable 5
+    fi
   elif [ "$extension" = "phalcon4" ]; then
     echo '4.1.2'
   elif [ "$extension" = "phalcon3" ]; then
@@ -31,7 +35,7 @@ add_phalcon_helper() {
   else
     package="php${version:?}-$extension"
     add_ppa ondrej/php >/dev/null 2>&1 || update_ppa ondrej/php
-    [ "$extension" = "phalcon4" ] && (install_packages "php${version:?}-psr" || pecl_install psr || pecl_install psr-1.1.0)
+    [[ "$extension" =~ phalcon[4|5] ]] && (install_packages "php${version:?}-psr" || pecl_install psr || pecl_install psr-1.1.0)
     (check_package "$package" && install_packages "$package") || pecl_install phalcon-"$(get_phalcon_version)" || add_phalcon_from_repo
   fi
 }
@@ -87,6 +91,7 @@ add_phalcon5() {
 add_phalcon() {
   local extension=$1
   status='Enabled'
+  [ "$extension" = "phalcon" ] && extension=phalcon5
   extension_major_version=${extension: -1}
   if [[ "$extension_major_version" =~ [3-5] ]]; then
     add_phalcon"$extension_major_version" >/dev/null 2>&1

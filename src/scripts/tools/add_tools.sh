@@ -19,7 +19,7 @@ get_tool_version() {
       composer_version="$(grep -Ea "const\sVERSION" "$tool_path_dir/composer" | grep -Eo "$version_regex")"
     fi
     echo "$composer_version" | sudo tee /tmp/composer_version
-  else
+  elif [ -n "$param" ]; then
     $tool "$param" 2>/dev/null | sed -Ee "s/[Cc]omposer(.)?$version_regex//g" | grep -Eo "$version_regex" | head -n 1
   fi
 }
@@ -42,7 +42,7 @@ configure_composer() {
     echo '{}' | tee "$composer_json" >/dev/null
     chmod 644 "$composer_json"
   fi
-  add_env_path "${src:?}"/configs/composer.env
+  set_composer_env
   add_path "$composer_bin"
   set_composer_auth
 }
@@ -68,11 +68,25 @@ set_composer_auth() {
   fi
 }
 
+# Function to set composer environment variables.
+set_composer_env() {
+  composer_env="${src:?}"/configs/composer.env
+  if [ -n "$COMPOSER_PROCESS_TIMEOUT" ]; then
+    sed_arg="s/COMPOSER_PROCESS_TIMEOUT.*/COMPOSER_PROCESS_TIMEOUT=$COMPOSER_PROCESS_TIMEOUT/"
+    sed -i "$sed_arg" "$composer_env" 2>/dev/null || sed -i '' "$sed_arg" "$composer_env"
+  fi
+  add_env_path "$composer_env"
+}
+
 # Helper function to configure tools.
 add_tools_helper() {
   tool=$1
   extensions=()
-  if [ "$tool" = "codeception" ]; then
+  if [ "$tool" = "blackfire-player" ]; then
+    extensions+=(uuid)
+  elif [ "$tool" = "box" ]; then
+    extensions+=(iconv mbstring phar sodium)
+  elif [ "$tool" = "codeception" ]; then
     extensions+=(json mbstring)
     sudo ln -s "$scoped_dir"/vendor/bin/codecept "$scoped_dir"/vendor/bin/codeception
   elif [ "$tool" = "composer" ]; then
@@ -128,6 +142,9 @@ add_tool() {
   tool=$2
   ver_param=$3
   tool_path="$tool_path_dir/$tool"
+  if ! [ -d "$tool_path_dir" ]; then
+    sudo mkdir -p "$tool_path_dir"
+  fi
   add_path "$tool_path_dir"
   if [ -e "$tool_path" ]; then
     sudo cp -aL "$tool_path" /tmp/"$tool"
@@ -153,7 +170,7 @@ add_tool() {
 }
 
 # Function to setup a tool using composer in a different scope.
-add_composertool_helper() {
+add_composer_tool_helper() {
   tool=$1
   release=$2
   prefix=$3
@@ -184,7 +201,7 @@ add_composertool_helper() {
 }
 
 # Function to setup a tool using composer.
-add_composertool() {
+add_composer_tool() {
   tool=$1
   release=$2
   prefix=$3
@@ -199,7 +216,7 @@ add_composertool() {
       return
     fi
   fi
-  add_composertool_helper "$tool" "$release" "$prefix" "$scope" "$composer_args"
+  add_composer_tool_helper "$tool" "$release" "$prefix" "$scope" "$composer_args"
   tool_version=$(get_tool_version cat /tmp/composer.log)
   ([ -s /tmp/composer.log ] && add_log "$tick" "$tool" "Added $tool $tool_version"
   ) || add_log "$cross" "$tool" "Could not setup $tool"

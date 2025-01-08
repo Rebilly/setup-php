@@ -1,3 +1,4 @@
+import fs from 'fs';
 import * as path from 'path';
 import * as core from '@actions/core';
 import * as fetch from './fetch';
@@ -44,8 +45,8 @@ export async function getInput(
   }
 }
 
-/** Function to get manifest URL
- *
+/**
+ * Function to get manifest URL
  */
 export async function getManifestURL(): Promise<string> {
   return 'https://raw.githubusercontent.com/shivammathur/setup-php/develop/src/configs/php-versions.json';
@@ -57,10 +58,11 @@ export async function getManifestURL(): Promise<string> {
  * @param version
  */
 export async function parseVersion(version: string): Promise<string> {
-  const manifest = await getManifestURL();
   switch (true) {
-    case /^(latest|nightly|\d+\.x)$/.test(version):
-      return JSON.parse((await fetch.fetch(manifest))['data'])[version];
+    case /^(latest|lowest|highest|nightly|\d+\.x)$/.test(version):
+      return JSON.parse((await fetch.fetch(await getManifestURL()))['data'])[
+        version
+      ];
     default:
       switch (true) {
         case version.length > 1:
@@ -247,7 +249,8 @@ export async function CSVArray(values_csv: string): Promise<Array<string>> {
             .trim()
             .replace(/^["']|["']$|(?<==)["']/g, '')
             .replace(/=(((?!E_).)*[?{}|&~![()^]+((?!E_).)+)/, "='$1'")
-            .replace(/=(.*?)(=.*)/, "='$1$2'");
+            .replace(/=(.*?)(=.*)/, "='$1$2'")
+            .replace(/:\s*["'](.*?)/g, ':$1');
         })
         .filter(Boolean);
   }
@@ -320,7 +323,14 @@ export async function getCommand(os: string, suffix: string): Promise<string> {
     case 'darwin':
       return 'add_' + suffix + ' ';
     case 'win32':
-      return 'Add-' + suffix.charAt(0).toUpperCase() + suffix.slice(1) + ' ';
+      return (
+        'Add-' +
+        suffix
+          .split('_')
+          .map((part: string) => part.charAt(0).toUpperCase() + part.slice(1))
+          .join('') +
+        ' '
+      );
     default:
       return await log('Platform ' + os + ' is not supported', os, 'error');
   }
@@ -413,6 +423,55 @@ export async function parseExtensionSource(
     ...matches.splice(1, matches.length),
     prefix
   );
+}
+
+/**
+ * Read php version from input or file
+ */
+export async function readPHPVersion(): Promise<string> {
+  const version = await getInput('php-version', false);
+  if (version) {
+    return version;
+  }
+  const versionFile =
+    (await getInput('php-version-file', false)) || '.php-version';
+  if (fs.existsSync(versionFile)) {
+    const contents: string = fs.readFileSync(versionFile, 'utf8');
+    const match: RegExpMatchArray | null = contents.match(
+      /^(?:php\s)?(\d+\.\d+\.\d+)$/m
+    );
+    return match ? match[1] : contents.trim();
+  } else if (versionFile !== '.php-version') {
+    throw new Error(`Could not find '${versionFile}' file.`);
+  }
+
+  const composerProjectDir = await readEnv('COMPOSER_PROJECT_DIR');
+  const composerLock = path.join(composerProjectDir, 'composer.lock');
+  if (fs.existsSync(composerLock)) {
+    const lockFileContents = JSON.parse(fs.readFileSync(composerLock, 'utf8'));
+    if (
+      lockFileContents['platform-overrides'] &&
+      lockFileContents['platform-overrides']['php']
+    ) {
+      return lockFileContents['platform-overrides']['php'];
+    }
+  }
+
+  const composerJson = path.join(composerProjectDir, 'composer.json');
+  if (fs.existsSync(composerJson)) {
+    const composerFileContents = JSON.parse(
+      fs.readFileSync(composerJson, 'utf8')
+    );
+    if (
+      composerFileContents['config'] &&
+      composerFileContents['config']['platform'] &&
+      composerFileContents['config']['platform']['php']
+    ) {
+      return composerFileContents['config']['platform']['php'];
+    }
+  }
+
+  return 'latest';
 }
 
 /**

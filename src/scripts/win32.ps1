@@ -3,7 +3,7 @@ param (
   [ValidateNotNull()]
   [ValidateLength(1, [int]::MaxValue)]
   [string]
-  $version = '8.2',
+  $version = '8.4',
   [Parameter(Position = 1, Mandatory = $true)]
   [ValidateNotNull()]
   [ValidateLength(1, [int]::MaxValue)]
@@ -23,7 +23,7 @@ Function Add-Log($mark, $subject, $message) {
   } else {
     printf "\033[31;1m%s \033[0m\033[34;1m%s \033[0m\033[90;1m%s \033[0m\n" $mark $subject $message
     if($env:fail_fast -eq 'true') {
-      exit 1;
+      Write-Error $message -ErrorAction Stop
     }
   }
 }
@@ -128,13 +128,51 @@ Function Add-EnvPATH {
   $env_data | Add-Content -Path $env_file -Encoding utf8
 }
 
+# Function to fetch a file from a URL.
+Function Get-File {
+  param (
+    [string]$Url,
+    [string]$FallbackUrl,
+    [string]$OutFile = '',
+    [int]$Retries = 3,
+    [int]$TimeoutSec = 0
+  )
+
+  for ($i = 0; $i -lt $Retries; $i++) {
+    try {
+      if($OutFile -ne '') {
+        Invoke-WebRequest -Uri $Url -OutFile $OutFile -TimeoutSec $TimeoutSec
+      } else {
+        Invoke-WebRequest -Uri $Url -TimeoutSec $TimeoutSec
+      }
+      break;
+    } catch {
+      if ($i -eq ($Retries - 1)) {
+        if($FallbackUrl) {
+          try {
+            if($OutFile -ne '') {
+              Invoke-WebRequest -Uri $FallbackUrl -OutFile $OutFile -TimeoutSec $TimeoutSec
+            } else {
+              Invoke-WebRequest -Uri $FallbackUrl -TimeoutSec $TimeoutSec
+            }
+          } catch {
+            throw "Failed to download the assets from $Url and $FallbackUrl"
+          }
+        } else {
+          throw "Failed to download the assets from $Url"
+        }
+      }
+    }
+  }
+}
+
 # Function to make sure printf is in PATH.
 Function Add-Printf {
   if (-not(Test-Path "C:\Program Files\Git\usr\bin\printf.exe")) {
     if(Test-Path "C:\msys64\usr\bin\printf.exe") {
       New-Item -Path $bin_dir\printf.exe -ItemType SymbolicLink -Value C:\msys64\usr\bin\printf.exe -Force > $null 2>&1
     } else {
-      Invoke-WebRequest -Uri "$github/shivammathur/printf/releases/latest/download/printf-x64.zip" -OutFile "$bin_dir\printf.zip"
+      Get-File -Url "$github/shivammathur/printf/releases/latest/download/printf-x64.zip" -OutFile "$bin_dir\printf.zip"
       Expand-Archive -Path $bin_dir\printf.zip -DestinationPath $bin_dir -Force
     }
   } else {
@@ -166,7 +204,7 @@ Function Install-PSPackage() {
   $module_path = "$bin_dir\$psm1_path.psm1"
   if(-not (Test-Path $module_path -PathType Leaf)) {
     $zip_file = "$bin_dir\$package.zip"
-    Invoke-WebRequest -Uri $url -OutFile $zip_file
+    Get-File -Url $url -OutFile $zip_file
     Expand-Archive -Path $zip_file -DestinationPath $bin_dir -Force
   }
   Import-Module $module_path
@@ -224,40 +262,49 @@ Function Set-PhpCache {
         if($_.name -match "php-$version.[0-9]+$env:PHPTS-Win32-.*-$arch.zip") {
           return $_.name
         }
-      }
+      } | Select-Object -Last 1
       if($null -eq $asset) {
         throw "Asset not found"
       }
     } catch {
-      $release = Invoke-WebRequest $php_builder/releases/expanded_assets/php$version
+      $release = Get-File -Url $php_builder/releases/expanded_assets/php$version
       $asset = $release.links.href | ForEach-Object {
         if($_ -match "php-$version.[0-9]+$env:PHPTS-Win32-.*-$arch.zip") {
           return $_.split('/')[-1]
         }
-      }
+      } | Select-Object -Last 1
     }
-    Invoke-WebRequest -UseBasicParsing -Uri $php_builder/releases/download/php$version/$asset -OutFile $php_dir\$asset
+    Get-File -Url $php_builder/releases/download/php$version/$asset -OutFile $php_dir\$asset
     Set-PhpDownloadCache -Path $php_dir CurrentUser
   } catch { }
 }
 
 # Function to add debug symbols to PHP.
 Function Add-DebugSymbols {
-  $release = Invoke-RestMethod https://api.github.com/repos/shivammathur/php-builder-windows/releases/tags/php$version
   $dev = if ($version -match $nightly_versions) { '-dev' } else { '' }
-  $asset = $release.assets | ForEach-Object {
-    if($_.name -match "php-debug-pack-$version.[0-9]+$dev$env:PHPTS-Win32-.*-$arch.zip") {
-      return $_.name
-    }
+  try {
+    $release = Invoke-RestMethod https://api.github.com/repos/shivammathur/php-builder-windows/releases/tags/php$version
+    $asset = $release.assets | ForEach-Object {
+      if($_.name -match "php-debug-pack-$version.[0-9]+$dev$env:PHPTS-Win32-.*-$arch.zip") {
+        return $_.name
+      }
+    } | Select-Object -Last 1
+  } catch {
+    $release = Get-File -Url $php_builder/releases/expanded_assets/php$version
+    $asset = $release.links.href | ForEach-Object {
+      if($_ -match "php-debug-pack-$version.[0-9]+$dev$env:PHPTS-Win32-.*-$arch.zip") {
+        return $_.split('/')[-1]
+      }
+    } | Select-Object -Last 1
   }
-  Invoke-WebRequest -UseBasicParsing -Uri $php_builder/releases/download/php$version/$asset -OutFile $php_dir\$asset
+  Get-File -Url $php_builder/releases/download/php$version/$asset -OutFile $php_dir\$asset
   Expand-Archive -Path $php_dir\$asset -DestinationPath $php_dir -Force
   Get-ChildItem -Path $php_dir -Filter php_*.pdb | Move-Item -Destination $ext_dir
 }
 
 # Function to install nightly version of PHP
 Function Install-PhpNightly {
-  Invoke-WebRequest -UseBasicParsing -Uri $php_builder/releases/latest/download/Get-PhpNightly.ps1 -OutFile $php_dir\Get-PhpNightly.ps1 > $null 2>&1
+  Get-File -Url $php_builder/releases/latest/download/Get-PhpNightly.ps1 -FallbackUrl https://dl.cloudsmith.io/public/shivammathur/php-builder-windows/raw/files/Get-PhpNightly.ps1 -OutFile $php_dir\Get-PhpNightly.ps1 > $null 2>&1
   & $php_dir\Get-PhpNightly.ps1 -Architecture $arch -ThreadSafe $ts -Path $php_dir -Version $version > $null 2>&1
   if(Test-Path $php_dir\COMMIT) {
     return " ($( Get-Content $php_dir\COMMIT ))"
@@ -285,8 +332,8 @@ if(-not([Environment]::Is64BitOperatingSystem) -or $version -lt '7.0') {
   $arch = 'x86'
 }
 
-$ts = $env:PHPTS -eq 'ts'
-if($env:PHPTS -ne 'ts') {
+$ts = ($env:PHPTS -match '^z?ts$')
+if(-not($ts)) {
   $env:PHPTS = '-nts'
 } else {
   $env:PHPTS = ''
@@ -303,7 +350,7 @@ if ( $env:GITHUB_ACTIONS -eq 'true') {
 if(-not($env:ImageOS) -and -not($env:ImageVersion)) {
   if($env:RUNNER -eq 'github') {
     Add-Log $cross "Runner" "Runner set as github in self-hosted environment"
-    exit 1
+    Write-Error "Runner set as github in self-hosted environment" -ErrorAction Stop
   }
   $bin_dir = 'C:\tools\bin'
   $php_dir = "$php_dir$version"
@@ -314,7 +361,7 @@ if(-not($env:ImageOS) -and -not($env:ImageVersion)) {
   if($version -lt 5.6) {
     Add-Log $cross "PHP" "PHP $version is not supported on self-hosted runner"
     Start-Sleep 1
-    exit 1
+    Write-Error "PHP $version is not supported on self-hosted runner" -ErrorAction Stop
   }
   if ($null -eq (Get-Module -ListAvailable -Name VcRedist)) {
     Install-Module -Name VcRedist -Force
@@ -354,6 +401,15 @@ if (Test-Path -LiteralPath $php_dir -PathType Container) {
 }
 $status = "Installed"
 $extra_version = ""
+if($version -eq 'pre') {
+  if($null -ne $installed) {
+    $version = $installed.MajorMinorVersion
+    $env:update = 'false'
+  } else {
+    Add-Log $cross "PHP" "No pre-installed PHP version found"
+    Write-Error "No pre-installed PHP version found" -ErrorAction Stop
+  }
+}
 if ($null -eq $installed -or -not("$($installed.Version).".StartsWith(($version -replace '^(\d+(\.\d+)*).*', '$1.'))) -or $ts -ne $installed.ThreadSafe) {
   if ($version -lt '7.0' -and ($null -eq (Get-Module -ListAvailable -Name VcRedist))) {
     Install-PSPackage VcRedist VcRedist-main\VcRedist\VcRedist "$github/aaronparker/VcRedist/archive/main.zip" Get-VcList >$null 2>&1
@@ -384,7 +440,7 @@ if($env:DEBUG -eq 'true') {
 $installed = Get-Php -Path $php_dir
 if($installed.MajorMinorVersion -ne $version) {
   Add-Log $cross "PHP" "Could not setup PHP $version"
-  exit 1
+  Write-Error "Could not setup PHP $version" -ErrorAction Stop
 }
 if($version -lt "5.5") {
   ('libeay32.dll', 'ssleay32.dll') | ForEach-Object -Parallel { Invoke-WebRequest -Uri "$using:php_builder/releases/download/openssl-1.0.2u/$_" -OutFile $using:php_dir\$_ >$null 2>&1 }

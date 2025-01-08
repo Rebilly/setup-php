@@ -1,4 +1,13 @@
 {
+  "box": {
+    "type": "phar",
+    "repository": "box-project/box",
+    "packagist": "humbug/box",
+    "extension": ".phar",
+    "domain": "https://github.com",
+    "version_prefix": "",
+    "version_parameter": "--version"
+  },
   "churn": {
     "type": "phar",
     "repository": "bmitch/churn-php",
@@ -6,6 +15,11 @@
     "domain": "https://github.com",
     "version_prefix": "",
     "version_parameter": "-V"
+  },
+  "composer-dependency-analyser": {
+    "type": "composer",
+    "repository": "shipmonk/composer-dependency-analyser",
+    "scope": "scoped"
   },
   "composer-unused": {
     "type": "phar",
@@ -57,16 +71,25 @@
   },
   "php-cs-fixer": {
     "type": "phar",
-    "repository": "FriendsOfPHP/PHP-CS-Fixer",
+    "repository": "PHP-CS-Fixer/PHP-CS-Fixer",
     "extension": ".phar",
     "domain": "https://github.com",
     "fetch_latest": "true",
     "version_prefix": "v",
     "version_parameter": "-V"
   },
+  "php-scoper": {
+    "type": "phar",
+    "repository": "humbug/php-scoper",
+    "packagist": "humbug/php-scoper",
+    "extension": ".phar",
+    "domain": "https://github.com",
+    "version_prefix": "",
+    "version_parameter": "--version"
+  },
   "phpcbf": {
     "type": "phar",
-    "repository": "squizlabs/PHP_CodeSniffer",
+    "repository": "PHPCSStandards/PHP_CodeSniffer",
     "extension": ".phar",
     "domain": "https://github.com",
     "version_prefix": "",
@@ -74,7 +97,7 @@
   },
   "phpcs": {
     "type": "phar",
-    "repository": "squizlabs/PHP_CodeSniffer",
+    "repository": "PHPCSStandards/PHP_CodeSniffer",
     "extension": ".phar",
     "domain": "https://github.com",
     "version_prefix": "",
@@ -222,6 +245,14 @@
     "version_prefix": "v",
     "version_parameter": "-V"
   },
+  "castor": {
+    "type": "custom-function",
+    "domain": "https://github.com",
+    "repository": "jolicode/castor",
+    "function": "castor",
+    "version_prefix": "v",
+    "version_parameter": "-V"
+  },
   "composer": {
     "type": "custom-function",
     "domain": "https://getcomposer.org",
@@ -268,6 +299,7 @@
   "phpunit": {
     "type": "custom-function",
     "repository": "sebastianbergmann/phpunit",
+    "packagist": "phpunit/phpunit",
     "domain": "https://phar.phpunit.de",
     "function": "phpunit",
     "version_prefix": "",
@@ -291,5 +323,11 @@
     "extension": ".phar",
     "version_parameter": "--version",
     "version_prefix": "v"
+  },
+  "easy-coding-standard": {
+    "type": "composer",
+    "alias": "ecs",
+    "repository": "symplify/easy-coding-standard",
+    "scope": "scoped"
   }
 }

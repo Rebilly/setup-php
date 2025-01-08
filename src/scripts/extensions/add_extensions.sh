@@ -48,7 +48,19 @@ enable_extension() {
     [ -d "$modules_dir" ] && sudo find "$modules_dir" -path "*disabled*$1" -delete
     enable_extension_dependencies "$1" "$2"
     enable_cache_extension_dependencies "$1" "$2"
-    echo "$2=${ext_dir:?}/$1.so" | sudo tee -a "${pecl_file:-${ini_file[@]}}" >/dev/null
+    if ! [[ "${version:?}" =~ ${old_versions:?} ]] && command -v phpenmod >/dev/null 2>&1; then
+      sudo sed -Ei "/=(.*\/)?\"?$extension(.so)?\"?$/d" "$pecl_file"
+      mod="${ini_dir:?}"/../mods-available/"$1".ini
+      if ! [ -e "$mod" ]; then
+        priority="${3:-20}";
+        mod_priority_line="$(grep -E "^$1=" "${src:?}/configs/mod_priority")";
+        [ -n "$mod_priority_line" ] && priority=$(echo "$mod_priority_line" | cut -d'=' -f 2)
+        (echo "; priority=$priority"; echo "$2=${ext_dir:?}/$1.so") | sudo tee "$mod" >/dev/null
+      fi
+      sudo phpenmod -v "$version" "$1" >/dev/null 2>&1
+    else
+      echo "$2=${ext_dir:?}/$1.so" | sudo tee -a "${pecl_file:-${ini_file[@]}}" >/dev/null
+    fi
   fi
 }
 
@@ -114,7 +126,7 @@ disable_all_shared() {
   sudo find "${ini_dir:-$scan_dir}"/.. -name "*.ini" -not -path "*php.ini" -not -path "*phar.ini" -not -path "*pecl.ini" -not -path "*mods-available*" -delete >/dev/null 2>&1 || true
   mkdir -p /tmp/extdisabled/"$version"
   sudo rm -f /tmp/php"$version"_extensions
-  sudo find "$ext_dir" -name '*.so' -print0 | xargs -0 -n 1 basename -s .so | xargs -n 1 -I{} touch /tmp/extdisabled/"$version"/{}
+  sudo find "$ext_dir" -name '*.so' -print0 | xargs -0 -n 1 basename -s .so | xargs -I{} touch /tmp/extdisabled/"$version"/{}
   add_log "${tick:?}" "none" "Disabled all shared extensions"
 }
 
@@ -123,7 +135,6 @@ configure_pecl() {
   [ -z "${pecl_file:-${ini_file[@]}}" ] && return
   if ! [ -e /tmp/pecl_config ]; then
     for script in pear pecl; do
-      sudo "$script" config-set php_ini "${pecl_file:-${ini_file[@]}}"
       sudo "$script" channel-update "$script".php.net
     done
     echo '' | sudo tee /tmp/pecl_config >/dev/null 2>&1
@@ -163,16 +174,31 @@ get_pecl_version() {
 # Function to install PECL extensions and accept default options
 pecl_install() {
   local extension=$1
+  local prefix=${2:-extension}
   add_pecl >/dev/null 2>&1
-  cpu_count="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo '1')"
-  prefix_opts="$(parse_args "$extension" CONFIGURE_PREFIX_OPTS) MAKEFLAGS='-j $cpu_count'"
-  suffix_opts="$(parse_args "$extension" CONFIGURE_OPTS) $(parse_args "$extension" CONFIGURE_SUFFIX_OPTS)"
-  IFS=' ' read -r -a libraries <<<"$(parse_args "$extension" LIBS) $(parse_args "$extension" "$(uname -s)"_LIBS)"
-  (( ${#libraries[@]} )) && add_libs "${libraries[@]}" >/dev/null 2>&1
-  if [ "$version" = "5.3" ]; then
-    yes '' 2>/dev/null | sudo "$prefix_opts" pecl install -f "$extension" >/dev/null 2>&1
+  disable_extension_helper "${extension%-*}" >/dev/null 2>&1
+  # Compare version with 8.3 so it runs only on 8.4 and above
+  # Install using the source interface as it allows for patching.
+  if [[ $(printf "%s\n%s" "${version:?}" "8.3" | sort -V | head -n1) != "$version" ]]; then
+    extension_version=${extension##*-};
+    [ "$extension_version" = "${extension%-*}" ] &&  extension_version=$(get_pecl_version "$extension" "stable")
+    add_extension_from_source "${extension%-*}" https://pecl.php.net "${extension%-*}" "${extension%-*}" "$extension_version" "$prefix" pecl
+    check_extension "${extension%-*}" && return 0 || return 1;
   else
-    yes '' 2>/dev/null | sudo "$prefix_opts" pecl install -f -D "$(parse_pecl_configure_options "$suffix_opts")" "$extension" >/dev/null 2>&1
+    cpu_count="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo '1')"
+    prefix_opts="$(parse_args "$extension" CONFIGURE_PREFIX_OPTS) MAKEFLAGS='-j $cpu_count'"
+    suffix_opts="$(parse_args "$extension" CONFIGURE_OPTS) $(parse_args "$extension" CONFIGURE_SUFFIX_OPTS)"
+    IFS=' ' read -r -a libraries <<<"$(parse_args "$extension" LIBS) $(parse_args "$extension" "$(uname -s)"_LIBS)"
+    (( ${#libraries[@]} )) && add_libs "${libraries[@]}" >/dev/null 2>&1
+    if [ "$version" = "5.3" ]; then
+      yes '' 2>/dev/null | sudo "$prefix_opts" pecl install -f "$extension" >/dev/null 2>&1
+    else
+      yes '' 2>/dev/null | sudo "$prefix_opts" pecl install -f -D "$(parse_pecl_configure_options "$suffix_opts")" "$extension" >/dev/null 2>&1
+    fi
+    local exit_code=$?
+    sudo pecl info "$extension" | grep -iq 'zend extension' && prefix=zend_extension
+    enable_extension "${extension%-*}" "$prefix"
+    return "$exit_code"
   fi
 }
 
@@ -186,10 +212,9 @@ add_pecl_extension() {
     pecl_version=$(get_pecl_version "$extension" "$pecl_version")
   fi
   ext_version=$(php -r "echo phpversion('$extension');")
-  if [ "${ext_version/-/}" = "$pecl_version" ]; then
+  if check_extension "$extension" && [[ -z "$pecl_version" || (-n "$pecl_version" && "${ext_version/-/}" == "$pecl_version") ]]; then
     add_log "${tick:?}" "$extension" "Enabled"
   else
-    disable_extension_helper "$extension" >/dev/null 2>&1
     [ -n "$pecl_version" ] && pecl_version="-$pecl_version"
     pecl_install "$extension$pecl_version" || add_extension "$extension" "$(get_extension_prefix "$extension")" >/dev/null 2>&1
     extension_version="$(php -r "echo phpversion('$extension');")"

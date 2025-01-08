@@ -13,7 +13,7 @@ Function Get-ICUUrl() {
   $trunk = "https://windows.php.net"
   $urls=@("${trunk}/downloads/php-sdk/deps/${vs_version}/${arch}", "${trunk}/downloads/php-sdk/deps/archives/${vs_version}/${arch}")
   foreach ($url in $urls) {
-    $web_content = Invoke-WebRequest -Uri $url
+    $web_content = Get-File -Url $url
     foreach ($link in $web_content.Links) {
       if ($link -match "/.*ICU-${icu_version}.*/") {
         return $trunk + $link.HREF
@@ -32,7 +32,7 @@ Function Repair-ICU() {
     $zip_url = Get-ICUUrl $icu.Groups[1].Value $installed.Architecture $vs
     if ($zip_url -ne '') {
       New-Item -Path "$php_dir" -Name "icu" -ItemType "directory" -Force > $null 2>&1
-      Invoke-WebRequest -Uri $zip_url -OutFile "$php_dir\icu\icu.zip"
+      Get-File -Url $zip_url -OutFile "$php_dir\icu\icu.zip"
       Expand-Archive -Path $php_dir\icu\icu.zip -DestinationPath $php_dir\icu -Force
       Get-ChildItem $php_dir\icu\bin -Filter *.dll | Copy-Item -Destination $php_dir -Force
     }
@@ -47,10 +47,5 @@ Function Add-Http() {
   }
   Add-Extension pecl_http >$null 2>&1
   Repair-ICU
-  try {
-    php --ri "http" 2> $null | Out-Null
-    Add-Log $tick "http" "Installed and enabled"
-  } catch {
-    Add-Log $cross "http" "Could not install http on PHP $( $installed.FullVersion )"
-  }
+  Add-ExtensionLog http "Installed and enabled"
 }

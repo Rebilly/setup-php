@@ -62,6 +62,7 @@ configure_brew() {
     add_brew
     brew_path="$(command -v brew)"
   fi
+  brew_opts=(-f)
   brew_path_dir="$(dirname "$brew_path")"
   brew_prefix="$brew_path_dir"/..
   brew_repo="$brew_path_dir/$(dirname "$(readlink "$brew_path")")"/..
@@ -69,11 +70,11 @@ configure_brew() {
   core_repo="$tap_dir"/homebrew/homebrew-core
 
   export HOMEBREW_CHANGE_ARCH_TO_ARM=1
-  export HOMEBREW_DEVELOPER=1
   export HOMEBREW_NO_AUTO_UPDATE=1
   export HOMEBREW_NO_ENV_HINTS=1
   export HOMEBREW_NO_INSTALL_CLEANUP=1
   export HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1
+  export brew_opts
   export brew_path
   export brew_path_dir
   export brew_prefix

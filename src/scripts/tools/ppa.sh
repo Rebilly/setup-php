@@ -31,10 +31,6 @@ set_base_version() {
   else
     set_base_version_codename
     set_base_version_id
-
-    # Remove once PPAs start having bookworm releases
-    [ "$VERSION_CODENAME" = 'bookworm' ] && VERSION_CODENAME="bullseye"
-
     printf "ID=%s\nVERSION_ID=%s\nVERSION_CODENAME=%s\n" "$ID" "$VERSION_ID" "$VERSION_CODENAME" | tee /tmp/os-release >/dev/null 2>&1
   fi
 }
@@ -58,8 +54,8 @@ update_lists() {
   status_file=/tmp/os_lists
   if [[ -n "$ppa" && -n "$ppa_search" ]]; then
     list="$list_dir"/"$(basename "$(grep -lr "$ppa_search" "$list_dir")")"
-    status_file=/tmp/"${ppa/\//_}"
-  elif grep -Eq '^deb ' "$list_file"; then
+    status_file=/tmp/"$(echo -n "$ppa_search" | shasum -a 256 | cut -d ' ' -f 1)"
+  elif [ -e "$list_file" ] && grep -Eq '^deb |^Types deb' "$list_file"; then
     list="$list_file"
   fi
   if [ ! -e "$status_file" ]; then
@@ -92,7 +88,7 @@ add_key() {
   key_source=$4
   key_file=$5
   key_urls=("$key_source")
-  if [[ "$key_source" =~ launchpad.net|debian.org|setup-php.com ]]; then
+  if [[ "$key_source" =~ launchpad.net|debian.org ]]; then
     fingerprint="$("${ID}"_fingerprint "$ppa" "$ppa_url" "$package_dist")"
     sks_params="op=get&options=mr&exact=on&search=0x$fingerprint"
     key_urls=("${sks[@]/%/\/pks\/lookup\?"$sks_params"}")
@@ -125,7 +121,7 @@ add_list() {
   key_source=${3:-"$ppa_url"}
   package_dist=${4:-"$VERSION_CODENAME"}
   branches=${5:-main}
-  ppa_search="deb .*$ppa_url $package_dist .*$branches"
+  ppa_search="deb .*$ppa_url $package_dist .*$branches$"
   if check_lists "$ppa" "$ppa_search"; then
     echo "Repository $ppa already exists";
     return 1;
@@ -146,7 +142,7 @@ check_ppa() {
   ppa_url=${2:-"$lp_ppa/$ppa/ubuntu"}
   package_dist=${3:-"$VERSION_CODENAME"}
   branches=${4:-main}
-  ppa_search="deb .*$ppa_url $package_dist .*$branches"
+  ppa_search="deb .*$ppa_url $package_dist .*$branches$"
   if check_lists "$ppa" "$ppa_search"; then
     return 0;
   else
@@ -157,9 +153,26 @@ check_ppa() {
 # Function to remove a PPA.
 remove_list() {
   ppa=${1-ondrej/php}
-  ppa_url=${2:-"$lp_ppa/$ppa/ubuntu"}
-  grep -lr "$ppa_url" "$list_dir" | xargs -n1 sudo rm -f
+  [ -n "$2" ] && ppa_urls=("$2") || ppa_urls=("$lp_ppa/$ppa/ubuntu" "$lpc_ppa/$ppa/ubuntu")
+  for ppa_url in "${ppa_urls[@]}"; do
+    grep -lr "$ppa_url" "$list_dir" | xargs -n1 sudo rm -f
+  done
   sudo rm -f "$key_dir"/"${ppa/\//-}"-keyring || true
+}
+
+# Function to check if ubuntu ppa is up
+is_ubuntu_ppa_up() {
+  ppa=${1:-ondrej/php}
+  curl -s --connect-timeout 5 --max-time 5 --head --fail "$lp_ppa/$ppa/ubuntu/dists/$VERSION_CODENAME/Release" > /dev/null
+}
+
+# Function to add the PPA mirror.
+add_ppa_sp_mirror() {
+  ppa=$1
+  ppa_name="$(basename "$ppa")"
+  remove_list "$ppa" || true
+  [ "${debug:?}" = "debug" ] && add_list sp/"$ppa_name" "$sp/$ppa/ubuntu" "$sp/$ppa/ubuntu/key.gpg" "$VERSION_CODENAME" "main/debug"
+  add_list sp/"$ppa_name" "$sp/$ppa/ubuntu" "$sp/$ppa/ubuntu/key.gpg"
 }
 
 # Function to add a PPA.
@@ -167,8 +180,12 @@ add_ppa() {
   set_base_version
   ppa=${1:-ondrej/php}
   if [[ "$ID" = "ubuntu" || "$ID_LIKE" =~ ubuntu ]] && [[ "$ppa" =~ "ondrej/" ]]; then
-    [ "${debug:?}" = "debug" ] && add_list "$ppa" "$lp_ppa/$ppa/ubuntu" "$lp_ppa/$ppa/ubuntu" "$VERSION_CODENAME" "main/debug"
-    add_list "$ppa"
+    if is_ubuntu_ppa_up "$ppa" ; then
+      [ "${debug:?}" = "debug" ] && add_list "$ppa" "$lp_ppa/$ppa/ubuntu" "$lp_ppa/$ppa/ubuntu" "$VERSION_CODENAME" "main/debug"
+      add_list "$ppa"
+    else
+      add_ppa_sp_mirror "$ppa"
+    fi
   elif [[ "$ID" = "debian" || "$ID_LIKE" =~ debian ]] && [[ "$ppa" =~ "ondrej/" ]]; then
     [ "${debug:?}" = "debug" ] && add_list "$ppa" "$sury"/"${ppa##*/}"/ "$sury"/"${ppa##*/}"/apt.gpg "$VERSION_CODENAME" "main/debug"
     add_list "$ppa" "$sury"/"${ppa##*/}"/ "$sury"/"${ppa##*/}"/apt.gpg
@@ -193,14 +210,17 @@ update_ppa() {
 }
 
 # Variables
-list_file='/etc/apt/sources.list'
-list_dir="$list_file.d"
+list_dir='/etc/apt/sources.list.d'
+list_file="/etc/apt/sources.list.d/$ID.sources"
+[ -e "$list_file" ] || list_file='/etc/apt/sources.list'
 upstream_lsb='/etc/upstream-release/lsb-release'
 lp_api='https://api.launchpad.net/1.0'
 lp_ppa='http://ppa.launchpad.net'
+lpc_ppa='https://ppa.launchpadcontent.net'
 key_dir='/usr/share/keyrings'
 dist_info_dir='/usr/share/distro-info'
 sury='https://packages.sury.org'
+sp='https://setup-php.com'
 sks=(
   'https://keyserver.ubuntu.com'
   'https://pgp.mit.edu'

@@ -17,13 +17,13 @@ Function Edit-ComposerConfig() {
   php -r "try {`$p=new Phar('$tool_path.phar', 0);exit(0);} catch(Exception `$e) {exit(1);}"
   if ($? -eq $False) {
     Add-Log "$cross" "composer" "Could not download composer"
-    exit 1;
+    Write-Error "Could not download composer" -ErrorAction Stop
   }
   New-Item -ItemType Directory -Path $composer_bin -Force > $null 2>&1
   if (-not(Test-Path $composer_json)) {
     Set-Content -Path $composer_json -Value "{}"
   }
-  Add-EnvPATH $src\configs\composer.env
+  Set-ComposerEnv
   Add-Path $composer_bin
   Set-ComposerAuth
 }
@@ -52,12 +52,20 @@ Function Set-ComposerAuth() {
   }
 }
 
+# Function to set composer environment variables.
+Function Set-ComposerEnv() {
+  if ($env:COMPOSER_PROCESS_TIMEOUT) {
+    (Get-Content $src\configs\composer.env -Raw) -replace '(?m)^COMPOSER_PROCESS_TIMEOUT=.*$', "COMPOSER_PROCESS_TIMEOUT=$env:COMPOSER_PROCESS_TIMEOUT" | Set-Content $src\configs\composer.env
+  }
+  Add-EnvPATH $src\configs\composer.env
+}
+
 # Function to extract tool version.
 Function Get-ToolVersion() {
   Param (
     [Parameter(Position = 0, Mandatory = $true)]
     $tool,
-    [Parameter(Position = 1, Mandatory = $true)]
+    [Parameter(Position = 1, Mandatory = $false)]
     $param
   )
   $alp = "[a-zA-Z0-9\.]"
@@ -72,7 +80,9 @@ Function Get-ToolVersion() {
     Set-Variable -Name 'composer_version' -Value $composer_version -Scope Global
     return "$composer_version"
   }
-  return . $tool $param 2> $null | ForEach-Object { $_ -replace "composer $version_regex", '' } | Select-String -Pattern $version_regex | Select-Object -First 1 | ForEach-Object { $_.matches.Value }
+  if($null -ne $param) {
+    return . $tool $param 2> $null | ForEach-Object { $_ -replace "composer $version_regex", '' } | Select-String -Pattern $version_regex | Select-Object -First 1 | ForEach-Object { $_.matches.Value }
+  }
 }
 
 # Helper function to configure tools.
@@ -83,7 +93,9 @@ Function Add-ToolsHelper() {
     $tool
   )
   $extensions = @();
-  if($tool -eq "codeception") {
+  if($tool -eq "box") {
+    $extensions += @('iconv', 'mbstring', 'phar', 'sodium')
+  } elseif($tool -eq "codeception") {
     $extensions += @('json', 'mbstring')
     Copy-Item $env:codeception_bin\codecept.bat -Destination $env:codeception_bin\codeception.bat
   } elseif($tool -eq "composer") {
@@ -135,8 +147,7 @@ Function Add-Tool() {
     [Parameter(Position = 1, Mandatory = $true)]
     [ValidateNotNull()]
     $tool,
-    [Parameter(Position = 2, Mandatory = $true)]
-    [ValidateNotNull()]
+    [Parameter(Position = 2, Mandatory = $false)]
     $ver_param
   )
   if (Test-Path $bin_dir\$tool) {
@@ -152,7 +163,7 @@ Function Add-Tool() {
     } catch {
       if($url -match '.*github.com.*releases.*latest.*') {
         try {
-          $url = $url.replace("releases/latest/download", "releases/download/" + ([regex]::match((Invoke-WebRequest -Uri ($url.split('/release')[0] + "/releases")).Content, "([0-9]+\.[0-9]+\.[0-9]+)/" + ($url.Substring($url.LastIndexOf("/") + 1))).Groups[0].Value).split('/')[0])
+          $url = $url.replace("releases/latest/download", "releases/download/" + ([regex]::match((Get-File -Url ($url.split('/release')[0] + "/releases")).Content, "([0-9]+\.[0-9]+\.[0-9]+)/" + ($url.Substring($url.LastIndexOf("/") + 1))).Groups[0].Value).split('/')[0])
           $status_code = (Invoke-WebRequest -Passthru -Uri $url -OutFile $tool_path).StatusCode
         } catch { }
       }
@@ -183,7 +194,7 @@ Function Add-Tool() {
   }
 }
 
-Function Add-ComposertoolHelper() {
+Function Add-ComposerToolHelper() {
   Param (
     [Parameter(Position = 0, Mandatory = $true)]
     [string]
@@ -234,7 +245,7 @@ Function Add-ComposertoolHelper() {
 }
 
 # Function to setup a tool using composer.
-Function Add-Composertool() {
+Function Add-ComposerTool() {
   Param (
     [Parameter(Position = 0, Mandatory = $true)]
     [ValidateNotNull()]
@@ -267,7 +278,7 @@ Function Add-Composertool() {
     }
   }
   Enable-PhpExtension -Extension curl, mbstring, openssl -Path $php_dir
-  $log = Add-ComposertoolHelper $tool $release $prefix $scope $composer_args
+  $log = Add-ComposerToolHelper $tool $release $prefix $scope $composer_args
   if(Test-Path $composer_bin\composer) {
     Copy-Item -Path "$bin_dir\composer" -Destination "$composer_bin\composer" -Force
   }

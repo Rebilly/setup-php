@@ -51,9 +51,9 @@ set_output() {
 read_env() {
   update="${update:-${UPDATE:-false}}"
   [ "${debug:-${DEBUG:-false}}" = "true" ] && debug=debug && update=true || debug=release
-  [ "${phpts:-${PHPTS:-nts}}" = "ts" ] && ts=zts && update=true || ts=nts
+  [[ "${phpts:-${PHPTS:-nts}}" = "ts" || "${phpts:-${PHPTS:-nts}}" = "zts" ]] && ts=zts && update=true || ts=nts
   fail_fast="${fail_fast:-${FAIL_FAST:-false}}"
-  [[ -z "${ImageOS}" && -z "${ImageVersion}" ]] && _runner=self-hosted || _runner=github
+  [[ -z "${ImageOS}" && -z "${ImageVersion}" || -n ${ACT} ]] && _runner=self-hosted || _runner=github
   runner="${runner:-${RUNNER:-$_runner}}"
 
   if [[ "$runner" = "github" && $_runner = "self-hosted" ]]; then
@@ -63,7 +63,12 @@ read_env() {
 
   # Set Update to true if the ubuntu github image does not have PHP PPA.
   if [[ "$runner" = "github" && "${ImageOS}" =~ ubuntu.* ]]; then
-    check_ppa ondrej/php || update=true
+    if ! check_ppa ondrej/php; then
+      update=true
+      echo '' | sudo tee /tmp/sp_update >/dev/null 2>&1
+    elif [ -e /tmp/sp_update ]; then
+      update=true
+    fi
   fi
 
   export fail_fast
@@ -84,12 +89,23 @@ get() {
   if [ "$mode" = "-s" ]; then
     sudo curl "${curl_opts[@]}" "${links[0]}"
   else
+    lock_path="$file_path.lock"
+    until sudo mkdir "$lock_path" 2>/dev/null; do
+      sleep 1
+    done
+    if [ "$execute" = "-e" ]; then
+      until [ -z "$(fuser "$file_path" 2>/dev/null)" ]; do
+        sleep 1
+      done
+    fi
+    trap 'sudo rm -rf "$lock_path"' EXIT SIGINT SIGTERM
     for link in "${links[@]}"; do
       status_code=$(sudo curl -w "%{http_code}" -o "$file_path" "${curl_opts[@]}" "$link")
       [ "$status_code" = "200" ] && break
     done
     [ "$execute" = "-e" ] && sudo chmod a+x "$file_path"
     [ "$mode" = "-v" ] && echo "$status_code"
+    sudo rm -rf "$lock_path" >/dev/null 2>&1 || true
   fi
 }
 
@@ -168,14 +184,28 @@ self_hosted_setup() {
   fi
 }
 
+# Function to check pre-installed PHP
+check_pre_installed() {
+  if [ "$version" = "pre" ]; then
+    if [ -n "$php_config" ]; then
+      version="$(php_semver | cut -c 1-3)"
+      update=false
+    else
+      fail_fast=true
+      add_log "$cross" "PHP" "No pre-installed PHP version found"
+    fi
+  fi
+}
+
 # Function to configure PHP
 configure_php() {
   add_php_config
   ini_config_dir="${src:?}"/configs/ini
   ini_config_files=("$ini_config_dir"/php.ini)
-  [[ "$version" =~ $jit_versions ]] && ini_config_files+=("$ini_config_dir"/jit.ini)
+  jit_config_files=("$ini_config_dir"/jit.ini)
   [[ "$version" =~ $xdebug3_versions ]] && ini_config_files+=("$ini_config_dir"/xdebug.ini)
   cat "${ini_config_files[@]}" | sudo tee -a "${ini_file[@]:?}" >/dev/null 2>&1
+  [[ "$version" =~ $jit_versions ]] && cat "${jit_config_files[@]}" | sudo tee -a "${pecl_file:-${ini_file[@]}}" >/dev/null 2>&1
 }
 
 # Function to get PHP version in semver format.

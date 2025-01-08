@@ -1,6 +1,7 @@
 import path from 'path';
 import fs from 'fs';
 import * as fetch from './fetch';
+import * as packagist from './packagist';
 import * as utils from './utils';
 
 type RS = Record<string, string>;
@@ -21,11 +22,9 @@ interface IRef {
 export async function getSemverVersion(data: RS): Promise<string> {
   const search: string = data['version_prefix'] + data['version'];
   const url = `https://api.github.com/repos/${data['repository']}/git/matching-refs/tags%2F${search}.`;
-  let github_token: string = await utils.readEnv('GITHUB_TOKEN');
-  const composer_token: string = await utils.readEnv('COMPOSER_TOKEN');
-  if (composer_token && !github_token) {
-    github_token = composer_token;
-  }
+  const github_token: string =
+    (await utils.readEnv('GITHUB_TOKEN')) ||
+    (await utils.readEnv('COMPOSER_TOKEN'));
   const response: RS = await fetch.fetch(url, github_token);
   if (response.error || response.data === '[]') {
     data['error'] = response.error ?? `No version found with prefix ${search}.`;
@@ -201,7 +200,7 @@ export async function addArchive(data: RS): Promise<string> {
  * @param data
  */
 export async function addPackage(data: RS): Promise<string> {
-  const command = await utils.getCommand(data['os'], 'composertool');
+  const command = await utils.getCommand(data['os'], 'composer_tool');
   const parts: string[] = data['repository'].split('/');
   const args: string = await utils.joins(
     parts[1],
@@ -218,14 +217,40 @@ export async function addPackage(data: RS): Promise<string> {
  * @param data
  */
 export async function addBlackfirePlayer(data: RS): Promise<string> {
-  if (
-    /5\.[5-6]|7\.0/.test(data['php_version']) &&
-    data['version'] == 'latest'
-  ) {
-    data['version'] = '1.9.3';
+  switch (data['os']) {
+    case 'win32':
+      return await utils.addLog(
+        '$cross',
+        data['tool'],
+        data['tool'] + ' is not a windows tool',
+        'win32'
+      );
+    default:
+      if (data['version'] == 'latest') {
+        if (/5\.[5-6]|7\.0/.test(data['php_version'])) {
+          data['version'] = '1.9.3';
+        } else if (/7\.[1-4]|8\.0/.test(data['php_version'])) {
+          data['version'] = '1.22.0';
+        }
+      }
+      data['url'] = await getPharUrl(data);
+      return addArchive(data);
   }
-  data['url'] = await getPharUrl(data);
-  return addArchive(data);
+}
+
+/**
+ * Function to add Castor
+ *
+ * @param data
+ */
+export async function addCastor(data: RS): Promise<string> {
+  data['tool'] = 'castor.' + data['os'].replace('win32', 'windows') + '-amd64';
+  data['url'] = await getUrl(data);
+  data['tool'] = 'castor';
+  data['version_parameter'] = fs.existsSync('castor.php')
+    ? data['version_parameter']
+    : '';
+  return await addArchive(data);
 }
 
 /**
@@ -391,6 +416,11 @@ export async function addPhive(data: RS): Promise<string> {
  * @param data
  */
 export async function addPHPUnitTools(data: RS): Promise<string> {
+  if (data['version'] === 'latest') {
+    data['version'] =
+      (await packagist.search(data['packagist'], data['php_version'])) ??
+      'latest';
+  }
   data['url'] = await getPharUrl(data);
   return await addArchive(data);
 }
@@ -457,6 +487,7 @@ export async function getData(
   data['extension'] ??= '.phar';
   data['os'] = os;
   data['php_version'] = php_version;
+  data['packagist'] ??= data['repository'];
   data['prefix'] = data['github'] === data['domain'] ? 'releases' : '';
   data['verb'] = data['github'] === data['domain'] ? 'download' : '';
   data['fetch_latest'] ??= 'false';
@@ -471,6 +502,7 @@ export async function getData(
 }
 
 export const functionRecord: Record<string, (data: RS) => Promise<string>> = {
+  castor: addCastor,
   composer: addComposer,
   deployer: addDeployer,
   dev_tools: addDevTools,

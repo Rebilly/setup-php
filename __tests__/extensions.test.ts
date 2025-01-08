@@ -19,12 +19,16 @@ describe('Extension tests', () => {
     ${'pcov'}                                    | ${'5.6'} | ${'Add-Log "$cross" "pcov" "pcov is not supported on PHP 5.6"'}
     ${'pdo_oci'}                                 | ${'7.4'} | ${'Add-Oci pdo_oci'}
     ${'pecl_http'}                               | ${'7.4'} | ${'Add-Http'}
+    ${'pdo_sqlsrv'}                              | ${'7.4'} | ${'Add-Sqlsrv pdo_sqlsrv'}
     ${'phalcon3'}                                | ${'7.2'} | ${'Add-Phalcon phalcon3'}
     ${'phalcon4'}                                | ${'7.4'} | ${'Add-Phalcon phalcon4'}
     ${'sqlite'}                                  | ${'7.4'} | ${'Add-Extension sqlite3'}
+    ${'sqlsrv'}                                  | ${'5.6'} | ${'Add-Extension sqlsrv'}
+    ${'sqlsrv'}                                  | ${'7.4'} | ${'Add-Sqlsrv sqlsrv'}
     ${'sqlsrv-1.2.3preview1'}                    | ${'7.4'} | ${'Add-Extension sqlsrv devel 1.2.3'}
     ${'Xdebug'}                                  | ${'7.4'} | ${'Add-Extension xdebug'}
     ${'xdebug2'}                                 | ${'7.2'} | ${'Add-Extension xdebug stable 2.9.8'}
+    ${'zephir_parser'}                           | ${'7.2'} | ${'Add-ZephirParser zephir_parser'}
   `(
     'checking addExtensionOnWindows for extension $extension on version $version',
     async ({extension, version, output}) => {
@@ -48,6 +52,7 @@ describe('Extension tests', () => {
     ${'http-1.2.3'}                              | ${'7.3'} | ${'add_http http-1.2.3'}
     ${'intl-65.1'}                               | ${'5.6'} | ${'add_intl intl-65.1'}
     ${'ioncube'}                                 | ${'7.3'} | ${'add_ioncube'}
+    ${'memcache-8.2'}                            | ${'8.2'} | ${'add_pecl_extension memcache 8.2 extension'}
     ${'mongodb-mongodb/mongo-php-driver@master'} | ${'7.3'} | ${'add_extension_from_source mongodb https://github.com mongodb mongo-php-driver master extension'}
     ${'oci8'}                                    | ${'7.3'} | ${'add_oci oci8'}
     ${'pcov'}                                    | ${'5.6'} | ${'add_log "$cross" "pcov" "pcov is not supported on PHP 5.6'}
@@ -59,11 +64,14 @@ describe('Extension tests', () => {
     ${'pdo_sqlsrv'}                              | ${'7.4'} | ${'add_sqlsrv pdo_sqlsrv'}
     ${'pecl_http'}                               | ${'7.3'} | ${'add_http'}
     ${'phalcon3'}                                | ${'7.3'} | ${'add_phalcon phalcon3'}
+    ${'relay'}                                   | ${'7.4'} | ${'add_relay relay'}
+    ${'relay-v1.2.3'}                            | ${'7.4'} | ${'add_relay relay-v1.2.3'}
     ${'sqlite'}                                  | ${'7.4'} | ${'add_extension sqlite3'}
     ${'sqlsrv-1.2.3-beta1'}                      | ${'7.4'} | ${'add_pecl_extension sqlsrv 1.2.3beta1 extension'}
     ${'Xdebug'}                                  | ${'7.4'} | ${'add_extension xdebug'}
     ${'xdebug-alpha'}                            | ${'7.4'} | ${'add_unstable_extension xdebug alpha zend_extension'}
     ${'xdebug2'}                                 | ${'7.2'} | ${'add_pecl_extension xdebug 2.9.8 zend_extension'}
+    ${'zephir_parser-1.2.3'}                     | ${'7.2'} | ${'add_zephir_parser zephir_parser-1.2.3'}
   `(
     'checking addExtensionOnLinux for extension $extension on version $version',
     async ({extension, version, output}) => {
@@ -92,7 +100,9 @@ describe('Extension tests', () => {
     ${'pcov'}                                    | ${'5.6'} | ${'add_log "$cross" "pcov" "pcov is not supported on PHP 5.6"'}
     ${'pdo_oci'}                                 | ${'7.3'} | ${'add_oci pdo_oci'}
     ${'pecl_http'}                               | ${'7.3'} | ${'add_http'}
+    ${'relay-1.2.3'}                             | ${'7.4'} | ${'add_relay relay-1.2.3'}
     ${'sqlite'}                                  | ${'7.2'} | ${'add_extension sqlite3'}
+    ${'zephir_parser-v1.2.3'}                    | ${'7.2'} | ${'add_zephir_parser zephir_parser-v1.2.3'}
   `(
     'checking addExtensionOnDarwin for extension $extension on version $version',
     async ({extension, version, output}) => {

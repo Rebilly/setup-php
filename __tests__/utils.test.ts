@@ -1,3 +1,4 @@
+import fs from 'fs';
 import * as path from 'path';
 import * as utils from '../src/utils';
 
@@ -7,7 +8,8 @@ import * as utils from '../src/utils';
 jest.mock('@actions/core', () => ({
   getInput: jest.fn().mockImplementation(key => {
     return ['setup-php'].indexOf(key) !== -1 ? key : '';
-  })
+  }),
+  info: jest.fn()
 }));
 
 /**
@@ -193,6 +195,7 @@ describe('Utils tests', () => {
     expect(await utils.getCommand('linux', 'tool')).toBe('add_tool ');
     expect(await utils.getCommand('darwin', 'tool')).toBe('add_tool ');
     expect(await utils.getCommand('win32', 'tool')).toBe('Add-Tool ');
+    expect(await utils.getCommand('win32', 'tool_name')).toBe('Add-ToolName ');
     expect(await utils.getCommand('openbsd', 'tool')).toContain(
       'Platform openbsd is not supported'
     );
@@ -258,6 +261,55 @@ describe('Utils tests', () => {
     ).toContain(
       '\nadd_extension_from_source ext https://sub.domain.XN--tld org repo release extension'
     );
+  });
+
+  it('checking readPHPVersion', async () => {
+    expect(await utils.readPHPVersion()).toBe('latest');
+
+    process.env['php-version-file'] = '.phpenv-version';
+    await expect(utils.readPHPVersion()).rejects.toThrow(
+      "Could not find '.phpenv-version' file."
+    );
+
+    const existsSync = jest.spyOn(fs, 'existsSync').mockImplementation();
+    const readFileSync = jest.spyOn(fs, 'readFileSync').mockImplementation();
+
+    existsSync.mockReturnValue(true);
+    readFileSync.mockReturnValue('8.1');
+
+    expect(await utils.readPHPVersion()).toBe('8.1');
+
+    process.env['php-version'] = '8.2';
+    expect(await utils.readPHPVersion()).toBe('8.2');
+
+    delete process.env['php-version-file'];
+    delete process.env['php-version'];
+
+    existsSync.mockReturnValue(true);
+    readFileSync.mockReturnValue('ruby 1.2.3\nphp 8.4.2\nnode 20.1.2');
+    expect(await utils.readPHPVersion()).toBe('8.4.2');
+
+    existsSync.mockReturnValue(true);
+    readFileSync.mockReturnValue('setup-php');
+    expect(await utils.readPHPVersion()).toBe('setup-php');
+
+    existsSync.mockReturnValueOnce(false).mockReturnValueOnce(true);
+    readFileSync.mockReturnValue(
+      '{ "platform-overrides": { "php": "7.3.25" } }'
+    );
+    expect(await utils.readPHPVersion()).toBe('7.3.25');
+
+    existsSync
+      .mockReturnValueOnce(false)
+      .mockReturnValueOnce(false)
+      .mockReturnValueOnce(true);
+    readFileSync.mockReturnValue(
+      '{ "config": { "platform": { "php": "7.4.33" } } }'
+    );
+    expect(await utils.readPHPVersion()).toBe('7.4.33');
+
+    existsSync.mockClear();
+    readFileSync.mockClear();
   });
 
   it('checking setVariable', async () => {

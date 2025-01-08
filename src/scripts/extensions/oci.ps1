@@ -14,7 +14,7 @@ Function Add-InstantClient() {
     if ($arch -eq 'x86') {
       $suffix = 'nt'
     }
-    Invoke-WebRequest -Uri https://download.oracle.com/otn_software/nt/instantclient/instantclient-basiclite-$suffix.zip -OutFile $php_dir\instantclient.zip
+    Get-File -Url https://download.oracle.com/otn_software/nt/instantclient/instantclient-basiclite-$suffix.zip -OutFile $php_dir\instantclient.zip
     Expand-Archive -Path $php_dir\instantclient.zip -DestinationPath $php_dir -Force
     Copy-Item $php_dir\instantclient*\* $php_dir
   }
@@ -48,6 +48,7 @@ Function Get-Oci8DLL() {
       return $_
     }
   }
+  return $null
 }
 
 # Function to install oci8 and pdo_oci.
@@ -62,22 +63,17 @@ Function Add-Oci() {
   try {
     $status = 'Enabled'
     Add-InstantClient
-    if ($extension -eq "pdo_oci") {
-      Enable-PhpExtension pdo_oci -Path $php_dir
-    } else {
-      if(-not(Test-Path $ext_dir\php_oci8.dll)) {
-        $oci8DLL = Get-Oci8DLL
-        if($oci8DLL) {
-          Copy-Item -Path $oci8DLL -Destination $ext_dir\php_oci8.dll
-        } else {
-          $status = 'Installed and enabled'
-          Invoke-WebRequest -Uri (Get-Oci8Url) -OutFile $php_dir\oci8.zip
-          Expand-Archive -Path $php_dir\oci8.zip -DestinationPath $ext_dir -Force
-        }
+    if($version -lt '8.4') {
+      if($version -lt '5.6' -and $extension -eq 'oci8') {
+        Add-Content -Value "`r`nextension=php_oci8.dll" -Path $php_dir\php.ini
+      } else {
+        Enable-PhpExtension $extension -Path $php_dir
       }
-      Add-Content -Value "`r`nextension=php_oci8.dll" -Path $php_dir\php.ini
+    } else {
+      $status = 'Installed and enabled'
+      Add-Extension $extension >$null 2>&1
     }
-    Add-Log $tick $extension $status
+    Add-ExtensionLog $extension $status
     Add-LicenseLog
   } catch {
     Add-Log $cross $extension "Could not install $extension on PHP $( $installed.FullVersion )"
